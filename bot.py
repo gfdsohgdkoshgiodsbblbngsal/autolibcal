@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 
 import datetime
 
+import subprocess
+
 load_dotenv()
 
 logging.basicConfig(level=logging.DEBUG)
@@ -47,12 +49,7 @@ class Bot(commands.Bot):
 bot = Bot(command_prefix=commands.when_mentioned_or("!"),
                    intents=discord.Intents.all(),
                    activity=discord.Activity(type=discord.ActivityType.listening, name="brainrot"),
-                   owner_id=843230753734918154)
-
-def is_owner():
-    def predicate(interaction: discord.Interaction):
-        return interaction.user.id == 843230753734918154
-    return app_commands.check(predicate)
+                   owner_ids=[843230753734918154, 468941074245615617])
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -220,4 +217,4 @@ async def reload(ctx, extension="~"):
 os.environ['JISHAKU_NO_UNDERSCORE'] = 'true'
 
 if __name__ == "__main__":
-    bot.run(os.getenv('DISCORD_TOKEN'))
+    bot.run(os.getenv('BOT_TOKEN'))
