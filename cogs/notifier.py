@@ -71,9 +71,40 @@ async def last_available_day(silent=True):
             if not silent:
                 print(current_date.strftime("%m/%d/%Y"))
         current_date += datetime.timedelta(days=1)
-        await asyncio.sleep(0.1)   
     
     return current_date - datetime.timedelta(days=streak+2)
+
+async def update_stored_rooms():
+    current_date = datetime.datetime.now(tz=datetime.timezone(datetime.timedelta(hours=-7)))
+    date = await last_available_day()
+    date -= datetime.timedelta(days=1)
+
+    stored_rooms = []
+
+    while current_date < date:
+        response = await get_study_rooms(current_date.strftime("%Y-%m-%d"))
+        if isinstance(response, str):
+            current_date += datetime.timedelta(days=1)
+            continue
+        
+        rooms, period_names = response[0], response[1]
+        period_names = [' '.join(p.split()) for p in period_names]
+        
+        if len(period_names) != 6:
+            current_date += datetime.timedelta(days=1)
+            continue
+        
+        available_rooms = []
+        for period in rooms:
+            available_rooms.append(list(period[0]))
+        
+        stored_rooms.append(available_rooms)
+        current_date += datetime.timedelta(days=1)
+
+    with open("stored_rooms.dat", "wb") as file:
+        pickle.dump(stored_rooms, file)
+
+    return stored_rooms
 
 class Notifier(commands.Cog):
     def __init__(self, bot):
@@ -129,7 +160,7 @@ class Notifier(commands.Cog):
 
         await interaction.response.send_message(embed=embed, ephemeral=False)
 
-    @tasks.loop(minutes=1)
+    @tasks.loop(seconds=15)
     async def detect_new_rooms(self):
         print("test")
         date = await last_available_day()
@@ -162,10 +193,11 @@ class Notifier(commands.Cog):
         period_names = [' '.join(p.split()) for p in period_names]
         
         if len(period_names) != 6:
-            await channel.send("uhh...")
+            await channel.send(f"@everyone Error: The day you have requested has an abnormal schedule. Please manually check the website [here](https://mitty.libcal.com/r/new/availability?lid=20936&zone=0&gid=44085&capacity=1).")
             return
         
         print("New rooms detected!")
+        await update_stored_rooms()
         
         embed = discord.Embed(title=f"New Rooms Released! <t:{int(date.timestamp())}:d>", # timestamp
                               description="Check the website [here](https://mitty.libcal.com/r/new/availability?lid=20936&zone=0&gid=44085&capacity=1) for more information.",
@@ -186,7 +218,7 @@ class Notifier(commands.Cog):
         
         await channel.send("@everyone", embed=embed)
     
-    @tasks.loop(minutes=1)
+    @tasks.loop(seconds=15)
     async def detect_new_bookings(self): # detect when a room has been booked
         # maybe get the entire available date range?
         # store all those days in a list of lists
@@ -202,40 +234,13 @@ class Notifier(commands.Cog):
             with open("stored_rooms.dat", "rb") as file:
                 stored_rooms = pickle.load(file)
         except FileNotFoundError:
-            stored_rooms = []
-
-            current_date = datetime.datetime.now(tz=datetime.timezone(datetime.timedelta(hours=-7)))
-            date = await last_available_day()
-            date -= datetime.timedelta(days=1)
-
-            while current_date < date:
-                response = await get_study_rooms(current_date.strftime("%Y-%m-%d"))
-                if isinstance(response, str):
-                    current_date += datetime.timedelta(days=1)
-                    continue
-                
-                rooms, period_names = response[0], response[1]
-                period_names = [' '.join(p.split()) for p in period_names]
-                
-                if len(period_names) != 6:
-                    warning_embed = discord.Embed(title="Warning",
-                                                  description=f"{current_date.strftime('%m/%d/%Y')} has an abnormal schedule. Please manually check the website.",
-                                                  colour=discord.Colour.yellow())
-                    await channel.send(embed=warning_embed)
-                    current_date += datetime.timedelta(days=1)
-                    continue
-                
-                available_rooms = []
-                for period in rooms:
-                    available_rooms.append(list(period[0]))
-                
-                stored_rooms.append(available_rooms)
-                current_date += datetime.timedelta(days=1)
-
-            with open("stored_rooms.dat", "wb") as file:
-                pickle.dump(stored_rooms, file)
-
-            print(stored_rooms)
+            stored_rooms = await update_stored_rooms()
+        
+        if stored_rooms is None:
+            await update_stored_rooms()
+        
+        if self.bot.debug_output:
+            await channel.send(f"Stored Rooms: {stored_rooms}")
     
         # check if the stored rooms have changed
         current_date = datetime.datetime.now(tz=datetime.timezone(datetime.timedelta(hours=-7)))
@@ -263,7 +268,7 @@ class Notifier(commands.Cog):
                 available_rooms.append(list(period[0]))
             
             new_stored_rooms.append(available_rooms)
-            days.append(current_date.strftime("%m/%d/%Y"))
+            days.append(current_date.timestamp())
             
             current_date += datetime.timedelta(days=1)
 
@@ -282,9 +287,9 @@ class Notifier(commands.Cog):
             )
             
             differences = find_differences(stored_rooms, new_stored_rooms)
-            await channel.send(f"Booking made on {days[differences[0][0]]} at {period_names[differences[0][1]]} in {ROOM_NAMES[differences[0][2]]}.")
+            await channel.send(f"Booking made on <t:{int(days[differences[0][0]])}:d> for {period_names[differences[0][1]]} in {ROOM_NAMES[differences[0][2]]}.")
             
-            await channel.send("@everyone", embed=embed)
+            await channel.send("@here", embed=embed)
 
             # Update the stored_rooms.dat file
             with open("stored_rooms.dat", "wb") as file:
